@@ -1,0 +1,19 @@
+[package]
+name = "xarc"
+version = "0.1.0"
+authors = ["Mitchell Keith Bloch <bazald@gmail.com>"]
+description = "Xarc and XarcLocal implement smart pointers that support atomic operations include compare_and_swap and compare_exchange."
+readme = "README.md"
+edition = "2018"
+repository = "https://github.com/bazald/xarc/"
+license = "MPL-2.0"
+keywords = ["memory", "concurrency", "performance", "lock-free", "generic"]
+categories = ["concurrency", "memory-management"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+crossbeam-epoch = "0.8.2"
+
+[dev-dependencies]
+rayon = "1.4.0"
