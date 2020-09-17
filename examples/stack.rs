@@ -3,12 +3,12 @@ use rayon::iter::*;
 use std::{sync::atomic::Ordering, time::SystemTime};
 use xarc::{XarcAtomic, Xarc};
 
-struct Node<T: Default + Send + Sync> {
+struct Node<T: Send> {
     value: T,
     next: Xarc<Node<T>>,
 }
 
-impl<T: Default + Send + Sync> Node<T> {
+impl<T: Send> Node<T> {
     fn new(value: T, next: Xarc<Node<T>>) -> Self {
         Self {
             value,
@@ -21,24 +21,18 @@ impl<T: Default + Send + Sync> Node<T> {
     }
 }
 
-impl<T: Default + Send + Sync> Default for Node<T> {
-    fn default() -> Self {
-        Node::<T>::new(T::default(), Xarc::<Node<T>>::null())
-    }
-}
-
-struct Stack<T: Default + Send + Sync> {
+struct Stack<T: Send> {
     node: XarcAtomic<Node<T>>,
 }
 
-impl<T: Default + Send + Sync> Stack<T> {
+impl<T: Send> Stack<T> {
     fn new() -> Self {
         Self {
             node: XarcAtomic::null(),
         }
     }
 
-    fn push(&mut self, value: T) {
+    fn push(&self, value: T) {
         let mut new = Xarc::new(Node::new(value, Xarc::<Node<T>>::from(&self.node)));
         loop {
             match self.node.compare_exchange_weak(&new.maybe_deref().unwrap().next, &new, Ordering::AcqRel, Ordering::Acquire) {
@@ -51,7 +45,7 @@ impl<T: Default + Send + Sync> Stack<T> {
     }
 
     #[must_use]
-    fn try_pop(&mut self) -> Option<T> {
+    fn try_pop(&self) -> Option<T> {
         let mut current = self.node.load(Ordering::Acquire);
         loop {
             if current.is_null() {
@@ -73,16 +67,6 @@ impl<T: Default + Send + Sync> Stack<T> {
     }
 }
 
-macro_rules! ref_as_mut {
-    ($value:expr, $type:ty) => {
-        {
-            unsafe {
-                &mut *(($value) as *const $type as usize as *mut $type)
-            }
-        }
-    };
-}
-
 fn main() {
     let block_size = 512;
     let num_blocks = 512;
@@ -91,18 +75,18 @@ fn main() {
         ranges.push((i * block_size, (i + 1) * block_size));
     }
 
-    let mut stack = Stack::new();
+    let stack = Stack::new();
 
     let t0 = SystemTime::now();
     ranges.par_iter().for_each(|(begin, end)| {
         for i in *begin..*end {
-            ref_as_mut!(&stack, Stack<i64>).push(i);
+            stack.push(i);
         }
     });
     let t1 = SystemTime::now();
     ranges.par_iter().for_each(|(begin, end)| {
         for _ in *begin..*end {
-            let _ = ref_as_mut!(&stack, Stack<i64>).try_pop();
+            let _ = stack.try_pop();
         }
     });
     let t2 = SystemTime::now();

@@ -40,22 +40,22 @@ impl XarcCount {
     }
 }
 
-pub(crate) struct XarcData<T: Send + Sync> {
+pub(crate) struct XarcData<T: Send> {
     pub(crate) count: XarcCount,
-    pub(crate) value: T,
+    pub(crate) value: Option<T>,
 }
 
-impl<T: Send + Sync> XarcData<T> {
+impl<T: Send> XarcData<T> {
     #[must_use]
     pub(crate) fn new(value: T) -> Self {
         XarcData {
             count: XarcCount::new(),
-            value,
+            value: Some(value),
         }
     }
 }
 
-pub(crate) fn decrement<T: Send + Sync>(ptr: *mut XarcData<T>, guard: &Guard) {
+pub(crate) fn decrement<T: Send>(ptr: *mut XarcData<T>, guard: &Guard) {
     unsafe {
         if !ptr.is_null() && (*ptr).count.decrement() == 1 {
             let boxed = Box::from_raw(ptr);
@@ -66,7 +66,7 @@ pub(crate) fn decrement<T: Send + Sync>(ptr: *mut XarcData<T>, guard: &Guard) {
     }
 }
 
-pub(crate) fn unguarded_decrement<T: Send + Sync>(ptr: *mut XarcData<T>) {
+pub(crate) fn unguarded_decrement<T: Send>(ptr: *mut XarcData<T>) {
     unsafe {
         if !ptr.is_null() && (*ptr).count.decrement() == 1 {
             panic!("Unguarded XarcCount decrement to 0!")
@@ -74,7 +74,7 @@ pub(crate) fn unguarded_decrement<T: Send + Sync>(ptr: *mut XarcData<T>) {
     }
 }
 
-pub(crate) fn try_increment<T: Send + Sync>(ptr: *mut XarcData<T>, _guard: &Guard) -> Result<(), ()> {
+pub(crate) fn try_increment<T: Send>(ptr: *mut XarcData<T>, _guard: &Guard) -> Result<(), ()> {
     unsafe {
         if ptr.is_null() || (*ptr).count.try_increment().is_ok() {
             Ok(())
@@ -85,7 +85,7 @@ pub(crate) fn try_increment<T: Send + Sync>(ptr: *mut XarcData<T>, _guard: &Guar
     }
 }
 
-pub(crate) fn unguarded_increment<T: Send + Sync>(ptr: *mut XarcData<T>) {
+pub(crate) fn unguarded_increment<T: Send>(ptr: *mut XarcData<T>) {
     unsafe {
         if !ptr.is_null() && (*ptr).count.unsafe_increment() < 1 {
             panic!("Unguarded XarcCount increment from 0!");

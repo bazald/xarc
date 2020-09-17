@@ -4,11 +4,11 @@ use std::{ptr, sync::atomic::{AtomicPtr, Ordering}};
 
 /// `Xarc` is an atomic smart pointer.
 #[derive(Debug)]
-pub struct XarcAtomic<T: Default + Send + Sync> {
+pub struct XarcAtomic<T: Send> {
     pub(crate) ptr: AtomicPtr<XarcData<T>>,
 }
 
-impl<T: Default + Send + Sync> XarcAtomic<T> {
+impl<T: Send> XarcAtomic<T> {
     /// Initialize the atomic smart pointer with `value`.
     #[must_use]
     pub fn new(value: T) -> Self {
@@ -113,23 +113,14 @@ impl<T: Default + Send + Sync> XarcAtomic<T> {
     }
 }
 
-impl<T: Default + Send + Sync> Default for XarcAtomic<T> {
-    #[must_use]
-    fn default() -> Self {
-        XarcAtomic {
-            ptr: AtomicPtr::new(ptr::null_mut()),
-        }
-    }
-}
-
-impl<T: Default + Send + Sync> Drop for XarcAtomic<T> {
+impl<T: Send> Drop for XarcAtomic<T> {
     fn drop(&mut self) {
         let ptr = self.ptr.load(Ordering::Relaxed);
         decrement(ptr, &pin());
     }
 }
 
-impl<T: Default + Send + Sync> From<&Xarc<T>> for XarcAtomic<T> {
+impl<T: Send> From<&Xarc<T>> for XarcAtomic<T> {
     #[must_use]
     fn from(pointer: &Xarc<T>) -> Self {
         unguarded_increment(pointer.ptr);

@@ -4,11 +4,11 @@ use std::{hash::*, mem, ptr, sync::atomic::Ordering};
 
 /// `XarcLocal` is a thread-local smart pointer.
 #[derive(Debug, Eq)]
-pub struct Xarc<T: Default + Send + Sync> {
+pub struct Xarc<T: Send> {
     pub(crate) ptr: *mut XarcData<T>,
 }
 
-impl<T: Default + Send + Sync> Xarc<T> {
+impl<T: Send> Xarc<T> {
     /// Initialize the smart pointer with `value`.
     #[must_use]
     pub fn new(value: T) -> Self {
@@ -55,7 +55,10 @@ impl<T: Default + Send + Sync> Xarc<T> {
     pub fn maybe_deref(&self) -> Option<&T> {
         if !self.ptr.is_null() {
             unsafe {
-                Some(&(*self.ptr).value)
+                Some(match &(*self.ptr).value {
+                    Some(value) => value,
+                    None => panic!(),
+                })
             }
         }
         else {
@@ -70,7 +73,10 @@ impl<T: Default + Send + Sync> Xarc<T> {
     #[must_use]
     pub unsafe fn unguarded_maybe_deref_mut(&mut self) -> Option<&mut T> {
         if !self.ptr.is_null() {
-            Some(&mut (*self.ptr).value)
+            Some(match &mut (*self.ptr).value {
+                Some(value) => value,
+                None => panic!(),
+            })
         }
         else {
             None
@@ -83,7 +89,7 @@ impl<T: Default + Send + Sync> Xarc<T> {
             unsafe {
                 let data = &mut *self.ptr;
                 if data.count.load() == 1 {
-                    let value = mem::take(&mut data.value);
+                    let value = mem::take(&mut data.value).unwrap();
                     Ok(value)
                 }
                 else {
@@ -97,38 +103,31 @@ impl<T: Default + Send + Sync> Xarc<T> {
     }
 }
 
-impl<T: Default + Send + Sync> Default for Xarc<T> {
-    #[must_use]
-    fn default() -> Self {
-        Self::init(ptr::null_mut())
-    }
-}
-
-impl<T: Default + Send + Sync> Drop for Xarc<T> {
+impl<T: Send> Drop for Xarc<T> {
     fn drop(&mut self) {
         decrement(self.ptr, &pin());
     }
 }
 
-impl<T: Default + Send + Sync> From<&XarcAtomic<T>> for Xarc<T> {
+impl<T: Send> From<&XarcAtomic<T>> for Xarc<T> {
     #[must_use]
     fn from(shared: &XarcAtomic<T>) -> Self {
         shared.load(Ordering::Acquire)
     }
 }
 
-impl<T: Default + Send + Sync> Hash for Xarc<T> {
+impl<T: Send> Hash for Xarc<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         ptr::hash(self.ptr, state);
     }
 }
 
-impl<T: Default + Send + Sync> PartialEq for Xarc<T> {
+impl<T: Send> PartialEq for Xarc<T> {
     #[must_use]
     fn eq(&self, other: &Self) -> bool {
         self.ptr == other.ptr
     }
 }
 
-unsafe impl<T: Default + Send + Sync> Send for Xarc<T> {}
-unsafe impl<T: Default + Send + Sync> Sync for Xarc<T> {}
+unsafe impl<T: Send> Send for Xarc<T> {}
+unsafe impl<T: Send> Sync for Xarc<T> {}
