@@ -5,8 +5,8 @@
 //! `XarcLocal` is the corresponding thread-local dereferenceable pointer.
 
 mod internal;
-mod shared;
-mod local;
+mod atomic;
+mod pointer;
 
-pub use shared::Xarc;
-pub use local::XarcLocal;
+pub use atomic::XarcAtomic;
+pub use pointer::Xarc;

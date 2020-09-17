@@ -2,7 +2,7 @@
 name = "xarc"
 version = "0.1.0"
 authors = ["Mitchell Keith Bloch <bazald@gmail.com>"]
-description = "Xarc and XarcLocal implement smart pointers that support atomic operations include compare_and_swap and compare_exchange."
+description = "Xarc and XarcLocal implement smart pointers that support atomic operations including compare_and_swap and compare_exchange."
 readme = "README.md"
 edition = "2018"
 repository = "https://github.com/bazald/xarc/"

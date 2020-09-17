@@ -1,37 +1,47 @@
-use super::{internal::*, local::*};
+use super::{internal::*, pointer::*};
 use crossbeam_epoch::{Guard, pin};
 use std::{ptr, sync::atomic::{AtomicPtr, Ordering}};
 
 /// `Xarc` is an atomic smart pointer.
 #[derive(Debug)]
-pub struct Xarc<T: Send + Sync> {
+pub struct XarcAtomic<T: Default + Send + Sync> {
     pub(crate) ptr: AtomicPtr<XarcData<T>>,
 }
 
-impl<T: Send + Sync> Xarc<T> {
+impl<T: Default + Send + Sync> XarcAtomic<T> {
     /// Initialize the atomic smart pointer with `value`.
+    #[must_use]
     pub fn new(value: T) -> Self {
-        Xarc {
+        XarcAtomic {
             ptr: AtomicPtr::new(Box::into_raw(Box::new(XarcData::new(value)))),
         }
     }
 
     /// Initialize the atomic smart pointer with null.
+    #[must_use]
     pub fn null() -> Self {
-        Xarc {
+        XarcAtomic {
             ptr: AtomicPtr::new(ptr::null_mut()),
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn init(ptr: *mut XarcData<T>) -> Self {
+        XarcAtomic {
+            ptr: AtomicPtr::new(ptr),
         }
     }
 
     /// As an atomic operation, if `self == current` swap the contents of `self` with `new`.
     /// Returns the previous value of `self`.
     /// If the value does not equal `current` the operation failed.
-    pub fn compare_and_swap(&self, current: &XarcLocal<T>, new: &XarcLocal<T>, order: Ordering) -> XarcLocal<T> {
+    #[must_use]
+    pub fn compare_and_swap(&self, current: &Xarc<T>, new: &Xarc<T>, order: Ordering) -> Xarc<T> {
         unguarded_increment(new.ptr);
         let guard = pin();
         let ptr = self.ptr.compare_and_swap(current.ptr, new.ptr, order);
         if ptr == current.ptr {
-            XarcLocal::init(ptr)
+            Xarc::init(ptr)
         }
         else {
             unguarded_decrement(new.ptr);
@@ -41,12 +51,12 @@ impl<T: Send + Sync> Xarc<T> {
 
     /// As an atomic operation, if `self == current` swap the contents of `self` with `new`.
     /// Returns the previous value of `self` in a Result indicating whether the operation succeeded or failed.
-    pub fn compare_exchange(&self, current: &XarcLocal<T>, new: &XarcLocal<T>, success: Ordering, failure: Ordering) -> Result<XarcLocal<T>, XarcLocal<T>> {
+    pub fn compare_exchange(&self, current: &Xarc<T>, new: &Xarc<T>, success: Ordering, failure: Ordering) -> Result<Xarc<T>, Xarc<T>> {
         unguarded_increment(new.ptr);
         let guard = pin();
         match self.ptr.compare_exchange(current.ptr, new.ptr, success, failure) {
             Ok(ptr) => {
-                Ok(XarcLocal::init(ptr))
+                Ok(Xarc::init(ptr))
             },
             Err(ptr) => {
                 unguarded_decrement(new.ptr);
@@ -59,12 +69,12 @@ impl<T: Send + Sync> Xarc<T> {
     /// Returns the previous value of `self` in a Result indicating whether the operation succeeded or failed.
     /// Failure does not necessarily imply that `self != current`.
     /// This is typically called within a loop.
-    pub fn compare_exchange_weak(&self, current: &XarcLocal<T>, new: &XarcLocal<T>, success: Ordering, failure: Ordering) -> Result<XarcLocal<T>, XarcLocal<T>> {
+    pub fn compare_exchange_weak(&self, current: &Xarc<T>, new: &Xarc<T>, success: Ordering, failure: Ordering) -> Result<Xarc<T>, Xarc<T>> {
         unguarded_increment(new.ptr);
         let guard = pin();
         match self.ptr.compare_exchange_weak(current.ptr, new.ptr, success, failure) {
             Ok(ptr) => {
-                Ok(XarcLocal::init(ptr))
+                Ok(Xarc::init(ptr))
             },
             Err(ptr) => {
                 unguarded_decrement(new.ptr);
@@ -73,94 +83,70 @@ impl<T: Send + Sync> Xarc<T> {
         }
     }
 
-    /// Attempt to load the value into an `XarcLocal`.
-    /// It can fail if, after the pointer has been loaded but before it is used, it is swapped out in another thread and destroyed.
-    /// If success is required, use `XarcLocal::from` instead.
-    pub fn try_load(&self, order: Ordering) -> Result<XarcLocal<T>, ()> {
+    /// Load the value into an `XarcLocal`.
+    /// The internal atomic operation is repeated as needed until successful.
+    #[must_use]
+    pub fn load(&self, order: Ordering) -> Xarc<T> {
         let guard = pin();
-        XarcLocal::<T>::try_from(self.ptr.load(order), &guard)
+        loop {
+            if let Ok(pointer) = Xarc::<T>::try_from(self.ptr.load(order), &guard) {
+                return pointer;
+            }
+        }
     }
 
-    fn increment_or_reload(&self, ptr: *mut XarcData<T>, guard: &Guard) -> XarcLocal<T> {
+    /// Attempt to load the value into an `XarcLocal`.
+    /// It can fail if, after the pointer has been loaded but before it is used, it is swapped out in another thread and destroyed.
+    pub fn try_load(&self, order: Ordering) -> Result<Xarc<T>, ()> {
+        let guard = pin();
+        Xarc::<T>::try_from(self.ptr.load(order), &guard)
+    }
+
+    #[must_use]
+    fn increment_or_reload(&self, ptr: *mut XarcData<T>, guard: &Guard) -> Xarc<T> {
         if try_increment(ptr, guard).is_ok() {
-            XarcLocal::init(ptr)
+            Xarc::init(ptr)
         }
         else {
-            XarcLocal::from(self)
+            Xarc::from(self)
         }
     }
 }
 
-impl<T: Send + Sync> Default for Xarc<T> {
+impl<T: Default + Send + Sync> Default for XarcAtomic<T> {
+    #[must_use]
     fn default() -> Self {
-        Xarc {
+        XarcAtomic {
             ptr: AtomicPtr::new(ptr::null_mut()),
         }
     }
 }
 
-impl<T: Send + Sync> Drop for Xarc<T> {
+impl<T: Default + Send + Sync> Drop for XarcAtomic<T> {
     fn drop(&mut self) {
         let ptr = self.ptr.load(Ordering::Relaxed);
         decrement(ptr, &pin());
     }
 }
 
+impl<T: Default + Send + Sync> From<&Xarc<T>> for XarcAtomic<T> {
+    #[must_use]
+    fn from(pointer: &Xarc<T>) -> Self {
+        unguarded_increment(pointer.ptr);
+        XarcAtomic::init(pointer.ptr)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{sync::Arc, time::SystemTime};
 
     #[test]
     fn xarc_simple_st_test() {
-        let shared = Xarc::new(42);
+        let shared = XarcAtomic::new(42);
         let local = shared.try_load(Ordering::Acquire).unwrap();
         drop(shared);
         assert_eq!(*local.maybe_deref().unwrap(), 42);
     }
 
-    #[test]
-    fn xarc_st_performance_test() {
-        let t0 = SystemTime::now();
-        for _ in 1..500000 {
-            let _ = Arc::new(42);
-        }
-        let t1 = SystemTime::now();
-        for _ in 1..500000 {
-            let _ = Xarc::new(42);
-        }
-        let t2 = SystemTime::now();
-    
-        println!("Arc Time: {} µs\r\nXarc Time: {} µs",
-          t1.duration_since(t0).unwrap().as_micros(),
-          t2.duration_since(t1).unwrap().as_micros());
-    }
-
-    use rayon::iter::*;
-
-    #[test]
-    fn xarc_mt_performance_test() {
-        let shared = Xarc::new(42);
-
-        let mut values: Vec<i64> = Vec::new();
-        for i in 0..500000 {
-            values.push(i);
-        }
-
-        let t0 = SystemTime::now();
-        values.iter().for_each(|x| {
-            let local = XarcLocal::new(*x);
-            shared.compare_and_swap(&local, &local, Ordering::AcqRel);
-        });
-        let t1 = SystemTime::now();
-        values.par_iter().for_each(|x| {
-            let local = XarcLocal::new(*x);
-            shared.compare_and_swap(&local, &local, Ordering::AcqRel);
-        });
-        let t2 = SystemTime::now();
-
-        println!("Sequential Time: {} µs\r\nParallel Time: {} µs",
-          t1.duration_since(t0).unwrap().as_micros(),
-          t2.duration_since(t1).unwrap().as_micros());
-    }
 }

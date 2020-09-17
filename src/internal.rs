@@ -6,12 +6,14 @@ pub(crate) struct XarcCount {
 }
 
 impl XarcCount {
+    #[must_use]
     fn new() -> XarcCount {
         XarcCount {
             count: AtomicI64::new(1),
         }
     }
 
+    #[must_use]
     pub(crate) fn decrement(&self) -> i64 {
         self.count.fetch_sub(1, Ordering::Relaxed)
     }
@@ -27,8 +29,14 @@ impl XarcCount {
         Err(count)
     }
 
+    #[must_use]
     fn unsafe_increment(&self) -> i64 {
         self.count.fetch_add(1, Ordering::Relaxed)
+    }
+
+    #[must_use]
+    pub(crate) fn load(&self) -> i64 {
+        self.count.load(Ordering::Relaxed)
     }
 }
 
@@ -38,6 +46,7 @@ pub(crate) struct XarcData<T: Send + Sync> {
 }
 
 impl<T: Send + Sync> XarcData<T> {
+    #[must_use]
     pub(crate) fn new(value: T) -> Self {
         XarcData {
             count: XarcCount::new(),
