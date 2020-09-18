@@ -1,17 +1,20 @@
-extern crate xarc;
 use rayon::iter::*;
-use std::{sync::atomic::Ordering, time::SystemTime};
+use std::{cell::UnsafeCell, mem, sync::atomic::Ordering, time::SystemTime};
 use xarc::{XarcAtomic, Xarc};
 
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 struct Node<T: Send> {
-    value: T,
+    value: UnsafeCell<Option<T>>,
     next: Xarc<Node<T>>,
 }
 
 impl<T: Send> Node<T> {
     fn new(value: T, next: Xarc<Node<T>>) -> Self {
         Self {
-            value,
+            value: UnsafeCell::new(Some(value)),
             next,
         }
     }
@@ -26,16 +29,16 @@ struct Stack<T: Send> {
 }
 
 impl<T: Send> Stack<T> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             node: XarcAtomic::null(),
         }
     }
 
-    fn push(&self, value: T) {
-        let mut new = Xarc::new(Node::new(value, Xarc::<Node<T>>::from(&self.node)));
+    pub fn push(&self, value: T) {
+        let mut new = Xarc::new(Node::new(value, Xarc::from(&self.node)));
         loop {
-            match self.node.compare_exchange_weak(&new.maybe_deref().unwrap().next, &new, Ordering::AcqRel, Ordering::Acquire) {
+            match self.node.compare_exchange_weak(&new.maybe_deref().unwrap().next, &new, Ordering::Release, Ordering::Relaxed) {
                 Ok(_previous) => return,
                 Err(current) => unsafe {
                     new.unguarded_maybe_deref_mut().unwrap().replace_next(current)
@@ -45,8 +48,8 @@ impl<T: Send> Stack<T> {
     }
 
     #[must_use]
-    fn try_pop(&self) -> Option<T> {
-        let mut current = self.node.load(Ordering::Acquire);
+    pub fn try_pop(&self) -> Option<T> {
+        let mut current = self.node.load(Ordering::Relaxed);
         loop {
             if current.is_null() {
                 return None
@@ -56,14 +59,13 @@ impl<T: Send> Stack<T> {
                 Err(pointer) => current = pointer,
             }
         }
-        match current.try_take() {
-            Ok(node) => Some(node.value),
-            Err(_) => None,
+        unsafe {
+            mem::take(&mut *current.maybe_deref().unwrap().value.get())
         }
     }
 
-    fn is_empty(&self) -> bool {
-        self.node.load(Ordering::Acquire).is_null()
+    pub fn is_empty(&self) -> bool {
+        self.node.load(Ordering::Relaxed).is_null()
     }
 }
 
@@ -86,14 +88,14 @@ fn main() {
     let t1 = SystemTime::now();
     ranges.par_iter().for_each(|(begin, end)| {
         for _ in *begin..*end {
-            let _ = stack.try_pop();
+            let _ = stack.try_pop().unwrap();
         }
     });
     let t2 = SystemTime::now();
 
     assert_eq!(stack.is_empty(), true);
 
-    println!("Sequential Time: {} µs\r\nParallel Time: {} µs",
+    println!("Push Time: {} µs\r\nPop Time: {} µs",
       t1.duration_since(t0).unwrap().as_micros(),
       t2.duration_since(t1).unwrap().as_micros());
 }

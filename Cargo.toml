@@ -14,6 +14,10 @@ categories = ["concurrency", "memory-management"]
 
 [dependencies]
 crossbeam-epoch = "0.8.2"
+crossbeam-utils = "0.7.2"
 
 [dev-dependencies]
 rayon = "1.4.0"
+
+[target.'cfg(not(target_env = "msvc"))'.dev-dependencies]
+jemallocator = "0.3.2"

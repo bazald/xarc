@@ -1,11 +1,12 @@
 use super::{internal::*, pointer::*};
 use crossbeam_epoch::{Guard, pin};
+use crossbeam_utils::CachePadded;
 use std::{ptr, sync::atomic::{AtomicPtr, Ordering}};
 
 /// `Xarc` is an atomic smart pointer.
 #[derive(Debug)]
 pub struct XarcAtomic<T: Send> {
-    pub(crate) ptr: AtomicPtr<XarcData<T>>,
+    pub(crate) ptr: CachePadded<AtomicPtr<XarcData<T>>>,
 }
 
 impl<T: Send> XarcAtomic<T> {
@@ -13,7 +14,7 @@ impl<T: Send> XarcAtomic<T> {
     #[must_use]
     pub fn new(value: T) -> Self {
         XarcAtomic {
-            ptr: AtomicPtr::new(Box::into_raw(Box::new(XarcData::new(value)))),
+            ptr: CachePadded::new(AtomicPtr::new(Box::into_raw(Box::new(XarcData::new(value))))),
         }
     }
 
@@ -21,14 +22,14 @@ impl<T: Send> XarcAtomic<T> {
     #[must_use]
     pub fn null() -> Self {
         XarcAtomic {
-            ptr: AtomicPtr::new(ptr::null_mut()),
+            ptr: CachePadded::new(AtomicPtr::new(ptr::null_mut())),
         }
     }
 
     #[must_use]
     pub(crate) fn init(ptr: *mut XarcData<T>) -> Self {
         XarcAtomic {
-            ptr: AtomicPtr::new(ptr),
+            ptr: CachePadded::new(AtomicPtr::new(ptr)),
         }
     }
 
@@ -44,7 +45,7 @@ impl<T: Send> XarcAtomic<T> {
             Xarc::init(ptr)
         }
         else {
-            unguarded_decrement(new.ptr);
+            decrement(new.ptr, &guard);
             self.increment_or_reload(ptr, &guard)
         }
     }
@@ -59,7 +60,7 @@ impl<T: Send> XarcAtomic<T> {
                 Ok(Xarc::init(ptr))
             },
             Err(ptr) => {
-                unguarded_decrement(new.ptr);
+                decrement(new.ptr, &guard);
                 Err(self.increment_or_reload(ptr, &guard))
             },
         }
@@ -77,7 +78,7 @@ impl<T: Send> XarcAtomic<T> {
                 Ok(Xarc::init(ptr))
             },
             Err(ptr) => {
-                unguarded_decrement(new.ptr);
+                decrement(new.ptr, &guard);
                 Err(self.increment_or_reload(ptr, &guard))
             },
         }
@@ -89,7 +90,7 @@ impl<T: Send> XarcAtomic<T> {
     pub fn load(&self, order: Ordering) -> Xarc<T> {
         let guard = pin();
         loop {
-            if let Ok(pointer) = Xarc::<T>::try_from(self.ptr.load(order), &guard) {
+            if let Ok(pointer) = Xarc::try_from(self.ptr.load(order), &guard) {
                 return pointer;
             }
         }
@@ -99,7 +100,15 @@ impl<T: Send> XarcAtomic<T> {
     /// It can fail if, after the pointer has been loaded but before it is used, it is swapped out in another thread and destroyed.
     pub fn try_load(&self, order: Ordering) -> Result<Xarc<T>, ()> {
         let guard = pin();
-        Xarc::<T>::try_from(self.ptr.load(order), &guard)
+        Xarc::try_from(self.ptr.load(order), &guard)
+    }
+
+    /// As an atomic operation, swap the contents of `self` with `new`.
+    /// Returns the previous value of `self`.
+    #[must_use]
+    pub fn swap(&self, new: &Xarc<T>, order: Ordering) -> Xarc<T> {
+        unguarded_increment(new.ptr);
+        Xarc::init(self.ptr.swap(new.ptr, order))
     }
 
     #[must_use]

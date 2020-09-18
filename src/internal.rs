@@ -1,15 +1,16 @@
 use crossbeam_epoch::Guard;
+use crossbeam_utils::CachePadded;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 pub(crate) struct XarcCount {
-    count: AtomicI64,
+    count: CachePadded<AtomicI64>,
 }
 
 impl XarcCount {
     #[must_use]
     fn new() -> XarcCount {
         XarcCount {
-            count: AtomicI64::new(1),
+            count: CachePadded::new(AtomicI64::new(1)),
         }
     }
 
@@ -33,16 +34,11 @@ impl XarcCount {
     fn unsafe_increment(&self) -> i64 {
         self.count.fetch_add(1, Ordering::Relaxed)
     }
-
-    #[must_use]
-    pub(crate) fn load(&self) -> i64 {
-        self.count.load(Ordering::Relaxed)
-    }
 }
 
 pub(crate) struct XarcData<T: Send> {
     pub(crate) count: XarcCount,
-    pub(crate) value: Option<T>,
+    pub(crate) value: T,
 }
 
 impl<T: Send> XarcData<T> {
@@ -50,7 +46,7 @@ impl<T: Send> XarcData<T> {
     pub(crate) fn new(value: T) -> Self {
         XarcData {
             count: XarcCount::new(),
-            value: Some(value),
+            value,
         }
     }
 }
@@ -62,14 +58,6 @@ pub(crate) fn decrement<T: Send>(ptr: *mut XarcData<T>, guard: &Guard) {
             guard.defer_unchecked(move || {
                 drop(boxed);
             });
-        }
-    }
-}
-
-pub(crate) fn unguarded_decrement<T: Send>(ptr: *mut XarcData<T>) {
-    unsafe {
-        if !ptr.is_null() && (*ptr).count.decrement() == 1 {
-            panic!("Unguarded XarcCount decrement to 0!")
         }
     }
 }

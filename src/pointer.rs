@@ -1,6 +1,6 @@
 use super::{internal::*, atomic::*};
 use crossbeam_epoch::{Guard, pin};
-use std::{hash::*, mem, ptr, sync::atomic::Ordering};
+use std::{hash::*, ptr, sync::atomic::Ordering};
 
 /// `XarcLocal` is a thread-local smart pointer.
 #[derive(Debug, Eq)]
@@ -55,10 +55,7 @@ impl<T: Send> Xarc<T> {
     pub fn maybe_deref(&self) -> Option<&T> {
         if !self.ptr.is_null() {
             unsafe {
-                Some(match &(*self.ptr).value {
-                    Some(value) => value,
-                    None => panic!(),
-                })
+                Some(&(*self.ptr).value)
             }
         }
         else {
@@ -69,37 +66,24 @@ impl<T: Send> Xarc<T> {
     /// Dereference the pointer only if it is not null.
     /// None will be returned if it is null.
     /// # Safety
-    /// - This should be called only if you're absolutely, 100% certain that nobody else could possibly have access to this data.
+    /// - This should be called only if you're absolutely,
+    /// 100% certain that nobody else could possibly have access to this data
+    /// or if you *really* know what you're doing.
     #[must_use]
     pub unsafe fn unguarded_maybe_deref_mut(&mut self) -> Option<&mut T> {
         if !self.ptr.is_null() {
-            Some(match &mut (*self.ptr).value {
-                Some(value) => value,
-                None => panic!(),
-            })
+            Some(&mut (*self.ptr).value)
         }
         else {
             None
         }
     }
+}
 
-    /// If the pointer is non-null and the last pointing to its data, extract the raw data. Otherwise return itself.
-    pub fn try_take(self) -> Result<T, Self> {
-        if !self.ptr.is_null() {
-            unsafe {
-                let data = &mut *self.ptr;
-                if data.count.load() == 1 {
-                    let value = mem::take(&mut data.value).unwrap();
-                    Ok(value)
-                }
-                else {
-                    Err(self)
-                }
-            }
-        }
-        else {
-            Err(self)
-        }
+impl<T: Send> Clone for Xarc<T> {
+    fn clone(&self) -> Self {
+        unguarded_increment(self.ptr);
+        Xarc::init(self.ptr)
     }
 }
 
