@@ -1,6 +1,6 @@
-use super::{internal::*, atomic::*};
+use super::{internal::*};
 use crossbeam_epoch::{Guard, pin};
-use std::{hash::*, ptr, sync::atomic::Ordering};
+use std::{hash::*, ptr};
 
 /// `XarcLocal` is a thread-local smart pointer.
 #[derive(Debug, Eq)]
@@ -39,7 +39,8 @@ impl<T: Send> Xarc<T> {
 
     /// Reset the smart pointer to null.
     pub fn reset(&mut self) {
-        decrement(self.ptr, &pin());
+        let guard = pin();
+        decrement(self.ptr, &guard);
         self.ptr = ptr::null_mut();
     }
 
@@ -90,13 +91,6 @@ impl<T: Send> Clone for Xarc<T> {
 impl<T: Send> Drop for Xarc<T> {
     fn drop(&mut self) {
         decrement(self.ptr, &pin());
-    }
-}
-
-impl<T: Send> From<&XarcAtomic<T>> for Xarc<T> {
-    #[must_use]
-    fn from(shared: &XarcAtomic<T>) -> Self {
-        shared.load(Ordering::Acquire)
     }
 }
 

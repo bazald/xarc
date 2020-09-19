@@ -1,4 +1,4 @@
-extern crate xarc;
+use crossbeam_epoch::pin;
 use rayon::iter::*;
 use std::{sync::{Arc, atomic::Ordering}, time::SystemTime};
 use xarc::{XarcAtomic, Xarc};
@@ -38,6 +38,7 @@ fn xarc_mt_performance_test() {
 
     let t0 = SystemTime::now();
     values.iter().for_each(|x| {
+        let _guard = pin();
         let mut current = shared.load(Ordering::Acquire);
         let new = Xarc::new(*x);
         loop {
@@ -49,6 +50,7 @@ fn xarc_mt_performance_test() {
     });
     let t1 = SystemTime::now();
     values.par_iter().for_each(|x| {
+        let _guard = pin();
         let mut current = shared.load(Ordering::Acquire);
         let new = Xarc::new(*x);
         loop {

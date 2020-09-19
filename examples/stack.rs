@@ -1,3 +1,4 @@
+use crossbeam_epoch::pin;
 use rayon::iter::*;
 use std::{cell::UnsafeCell, mem, sync::atomic::Ordering, time::SystemTime};
 use xarc::{XarcAtomic, Xarc};
@@ -36,7 +37,8 @@ impl<T: Send> Stack<T> {
     }
 
     pub fn push(&self, value: T) {
-        let mut new = Xarc::new(Node::new(value, Xarc::from(&self.node)));
+        let _guard = pin();
+        let mut new = Xarc::new(Node::new(value, self.node.load(Ordering::Relaxed)));
         loop {
             match self.node.compare_exchange_weak(&new.maybe_deref().unwrap().next, &new, Ordering::Release, Ordering::Relaxed) {
                 Ok(_previous) => return,
@@ -49,6 +51,7 @@ impl<T: Send> Stack<T> {
 
     #[must_use]
     pub fn try_pop(&self) -> Option<T> {
+        let _guard = pin();
         let mut current = self.node.load(Ordering::Relaxed);
         loop {
             if current.is_null() {
@@ -65,6 +68,7 @@ impl<T: Send> Stack<T> {
     }
 
     pub fn is_empty(&self) -> bool {
+        let _guard = pin();
         self.node.load(Ordering::Relaxed).is_null()
     }
 }

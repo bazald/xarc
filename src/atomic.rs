@@ -1,5 +1,5 @@
 use super::{internal::*, pointer::*};
-use crossbeam_epoch::{Guard, pin};
+use crossbeam_epoch::pin;
 use crossbeam_utils::CachePadded;
 use std::{ptr, sync::atomic::{AtomicPtr, Ordering}};
 
@@ -38,30 +38,30 @@ impl<T: Send> XarcAtomic<T> {
     /// If the value does not equal `current` the operation failed.
     #[must_use]
     pub fn compare_and_swap(&self, current: &Xarc<T>, new: &Xarc<T>, order: Ordering) -> Xarc<T> {
-        unguarded_increment(new.ptr);
         let guard = pin();
+        unguarded_increment(new.ptr);
         let ptr = self.ptr.compare_and_swap(current.ptr, new.ptr, order);
         if ptr == current.ptr {
             Xarc::init(ptr)
         }
         else {
             decrement(new.ptr, &guard);
-            self.increment_or_reload(ptr, &guard)
+            self.increment_or_reload(ptr, order)
         }
     }
 
     /// As an atomic operation, if `self == current` swap the contents of `self` with `new`.
     /// Returns the previous value of `self` in a Result indicating whether the operation succeeded or failed.
     pub fn compare_exchange(&self, current: &Xarc<T>, new: &Xarc<T>, success: Ordering, failure: Ordering) -> Result<Xarc<T>, Xarc<T>> {
-        unguarded_increment(new.ptr);
         let guard = pin();
+        unguarded_increment(new.ptr);
         match self.ptr.compare_exchange(current.ptr, new.ptr, success, failure) {
             Ok(ptr) => {
                 Ok(Xarc::init(ptr))
             },
             Err(ptr) => {
                 decrement(new.ptr, &guard);
-                Err(self.increment_or_reload(ptr, &guard))
+                Err(self.increment_or_reload(ptr, failure))
             },
         }
     }
@@ -71,15 +71,15 @@ impl<T: Send> XarcAtomic<T> {
     /// Failure does not necessarily imply that `self != current`.
     /// This is typically called within a loop.
     pub fn compare_exchange_weak(&self, current: &Xarc<T>, new: &Xarc<T>, success: Ordering, failure: Ordering) -> Result<Xarc<T>, Xarc<T>> {
-        unguarded_increment(new.ptr);
         let guard = pin();
+        unguarded_increment(new.ptr);
         match self.ptr.compare_exchange_weak(current.ptr, new.ptr, success, failure) {
             Ok(ptr) => {
                 Ok(Xarc::init(ptr))
             },
             Err(ptr) => {
                 decrement(new.ptr, &guard);
-                Err(self.increment_or_reload(ptr, &guard))
+                Err(self.increment_or_reload(ptr, failure))
             },
         }
     }
@@ -112,12 +112,13 @@ impl<T: Send> XarcAtomic<T> {
     }
 
     #[must_use]
-    fn increment_or_reload(&self, ptr: *mut XarcData<T>, guard: &Guard) -> Xarc<T> {
-        if try_increment(ptr, guard).is_ok() {
+    fn increment_or_reload(&self, ptr: *mut XarcData<T>, order: Ordering) -> Xarc<T> {
+        let guard = pin();
+        if try_increment(ptr, &guard).is_ok() {
             Xarc::init(ptr)
         }
         else {
-            Xarc::from(self)
+            self.load(order)
         }
     }
 }

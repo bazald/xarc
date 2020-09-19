@@ -1,3 +1,5 @@
+use crossbeam_epoch::pin;
+use crossbeam_queue::SegQueue;
 use rayon::iter::*;
 use std::{cell::UnsafeCell, mem, sync::atomic::Ordering, time::SystemTime};
 use xarc::{XarcAtomic, Xarc};
@@ -35,6 +37,7 @@ impl<T: Send> Queue<T> {
     }
 
     pub fn push(&self, value: T) {
+        let _guard = pin();
         let value = Xarc::new(UnsafeCell::new(Some(value)));
         let mut new_tail = Xarc::new(Node::null());
         let mut current_tail = self.tail.load(Ordering::Relaxed);
@@ -57,6 +60,7 @@ impl<T: Send> Queue<T> {
 
     #[must_use]
     pub fn try_pop(&self) -> Option<T> {
+        let _guard = pin();
         let mut current_head = self.head.load(Ordering::Relaxed);
         loop {
             let current_head_deref = current_head.maybe_deref().unwrap();
@@ -88,6 +92,7 @@ impl<T: Send> Queue<T> {
     }
 
     pub fn is_empty(&self) -> bool {
+        let _guard = pin();
         self.head.load(Ordering::Relaxed) == self.tail.load(Ordering::Relaxed)
     }
 }
@@ -99,6 +104,22 @@ fn main() {
     for i in 0..num_blocks {
         ranges.push((i * block_size, (i + 1) * block_size));
     }
+
+    let cqueue = SegQueue::new();
+
+    let c0 = SystemTime::now();
+    ranges.par_iter().for_each(|(begin, end)| {
+        for i in *begin..*end {
+            cqueue.push(i);
+        }
+    });
+    let c1 = SystemTime::now();
+    ranges.par_iter().for_each(|(begin, end)| {
+        for _ in *begin..*end {
+            let _ = cqueue.pop().unwrap();
+        }
+    });
+    let c2 = SystemTime::now();
 
     let queue = Queue::new();
 
@@ -118,7 +139,9 @@ fn main() {
 
     assert_eq!(queue.is_empty(), true);
 
-    println!("Push Time: {} µs\r\nPop Time: {} µs",
-      t1.duration_since(t0).unwrap().as_micros(),
-      t2.duration_since(t1).unwrap().as_micros());
+    println!("Crossbeam Push Time: {} µs\r\nCrossbeam Pop Time: {} µs\r\nPush Time: {} µs\r\nPop Time: {} µs",
+        c1.duration_since(c0).unwrap().as_micros(),
+        c2.duration_since(c1).unwrap().as_micros(),
+        t1.duration_since(t0).unwrap().as_micros(),
+        t2.duration_since(t1).unwrap().as_micros());
 }
