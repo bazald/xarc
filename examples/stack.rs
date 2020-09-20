@@ -1,7 +1,8 @@
 use crossbeam_epoch::pin;
+use crossbeam_utils::Backoff;
 use rayon::iter::*;
 use std::{cell::UnsafeCell, mem, sync::atomic::Ordering, time::SystemTime};
-use xarc::{XarcAtomic, Xarc};
+use xarc::{AtomicXarc, Xarc};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -26,24 +27,28 @@ impl<T: Send> Node<T> {
 }
 
 struct Stack<T: Send> {
-    node: XarcAtomic<Node<T>>,
+    node: AtomicXarc<Node<T>>,
 }
 
 impl<T: Send> Stack<T> {
     pub fn new() -> Self {
         Self {
-            node: XarcAtomic::null(),
+            node: AtomicXarc::null(),
         }
     }
 
     pub fn push(&self, value: T) {
         let _guard = pin();
+        let backoff = Backoff::new();
         let mut new = Xarc::new(Node::new(value, self.node.load(Ordering::Relaxed)));
         loop {
             match self.node.compare_exchange_weak(&new.maybe_deref().unwrap().next, &new, Ordering::Release, Ordering::Relaxed) {
                 Ok(_previous) => return,
-                Err(current) => unsafe {
-                    new.unguarded_maybe_deref_mut().unwrap().replace_next(current)
+                Err(current) => {
+                    unsafe {
+                        new.unguarded_maybe_deref_mut().unwrap().replace_next(current);
+                    }
+                    backoff.spin();
                 },
             }
         }
@@ -52,6 +57,7 @@ impl<T: Send> Stack<T> {
     #[must_use]
     pub fn try_pop(&self) -> Option<T> {
         let _guard = pin();
+        let backoff = Backoff::new();
         let mut current = self.node.load(Ordering::Relaxed);
         loop {
             if current.is_null() {
@@ -59,7 +65,10 @@ impl<T: Send> Stack<T> {
             }
             match self.node.compare_exchange_weak(&current, &current.maybe_deref().unwrap().next, Ordering::Acquire, Ordering::Relaxed) {
                 Ok(_) => break,
-                Err(pointer) => current = pointer,
+                Err(pointer) => {
+                    current = pointer;
+                    backoff.spin();
+                },
             }
         }
         unsafe {

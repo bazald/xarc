@@ -1,43 +1,45 @@
 use crossbeam_epoch::pin;
 use crossbeam_queue::SegQueue;
+use crossbeam_utils::Backoff;
 use rayon::iter::*;
 use std::{cell::UnsafeCell, mem, sync::atomic::Ordering, time::SystemTime};
-use xarc::{XarcAtomic, Xarc};
+use xarc::{AtomicXarc, Xarc};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 struct Node<T: Send> {
-    value: XarcAtomic<UnsafeCell<Option<T>>>,
-    next: XarcAtomic<Node<T>>,
+    value: AtomicXarc<UnsafeCell<Option<T>>>,
+    next: AtomicXarc<Node<T>>,
 }
 
 impl<T: Send> Node<T> {
     fn null() -> Self {
         Self {
-            value: XarcAtomic::null(),
-            next: XarcAtomic::null(),
+            value: AtomicXarc::null(),
+            next: AtomicXarc::null(),
         }
     }
 }
 
 struct Queue<T: Send> {
-    head: XarcAtomic<Node<T>>,
-    tail: XarcAtomic<Node<T>>,
+    head: AtomicXarc<Node<T>>,
+    tail: AtomicXarc<Node<T>>,
 }
 
 impl<T: Send> Queue<T> {
     pub fn new() -> Self {
         let node = Xarc::new(Node::null());
         Self {
-            head: XarcAtomic::from(&node),
-            tail: XarcAtomic::from(&node),
+            head: AtomicXarc::from(&node),
+            tail: AtomicXarc::from(&node),
         }
     }
 
     pub fn push(&self, value: T) {
         let _guard = pin();
+        let backoff = Backoff::new();
         let value = Xarc::new(UnsafeCell::new(Some(value)));
         let mut new_tail = Xarc::new(Node::null());
         let mut current_tail = self.tail.load(Ordering::Relaxed);
@@ -47,12 +49,15 @@ impl<T: Send> Queue<T> {
                     let _ = self.try_update_tail(&current_tail, &new_tail);
                     break;
                 },
-                Err(_) => match self.try_update_tail(&current_tail, &new_tail) {
-                    Ok(current_tail_next) => {
-                        current_tail = current_tail_next;
-                        new_tail = Xarc::new(Node::null());
-                    },
-                    Err(current_tail_next) => current_tail = current_tail_next,
+                Err(_) => {
+                    match self.try_update_tail(&current_tail, &new_tail) {
+                        Ok(current_tail_next) => {
+                            current_tail = current_tail_next;
+                            new_tail = Xarc::new(Node::null());
+                        },
+                        Err(current_tail_next) => current_tail = current_tail_next,
+                    };
+                    backoff.spin();
                 },
             }
         }
@@ -61,6 +66,7 @@ impl<T: Send> Queue<T> {
     #[must_use]
     pub fn try_pop(&self) -> Option<T> {
         let _guard = pin();
+        let backoff = Backoff::new();
         let mut current_head = self.head.load(Ordering::Relaxed);
         loop {
             let current_head_deref = current_head.maybe_deref().unwrap();
@@ -80,7 +86,10 @@ impl<T: Send> Queue<T> {
                 Ok(_) => unsafe {
                     return mem::take(&mut *current_head.maybe_deref().unwrap().value.load(Ordering::Acquire).maybe_deref().unwrap().get())
                 },
-                Err(head) => current_head = head,
+                Err(head) => {
+                    current_head = head;
+                    backoff.spin();
+                },
             };
         }
     }

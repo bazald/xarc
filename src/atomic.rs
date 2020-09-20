@@ -2,19 +2,37 @@ use super::{internal::*, pointer::*};
 use alloc::boxed::Box;
 use core::{ptr, sync::atomic::{AtomicPtr, Ordering}};
 use crossbeam_epoch::pin;
-use crossbeam_utils::CachePadded;
+use crossbeam_utils::{Backoff, CachePadded};
 
-/// `Xarc` is an atomic smart pointer.
+/// `AtomicXarc` provides atomic storage for `Xarc` atomically refcounted smart pointers.
+/// 
+/// # Examples
+/// 
+/// Here is some typical usage of `AtomicXarc`.
+/// ```
+/// use core::sync::atomic::Ordering;
+/// use xarc::{AtomicXarc, Xarc};
+/// 
+/// let atomic = AtomicXarc::new(42);
+/// let same = atomic.load(Ordering::Acquire);
+/// let different = Xarc::new(42);
+/// 
+/// assert_eq!(*atomic.load(Ordering::Acquire).maybe_deref().unwrap(), 42);
+/// assert!(atomic.compare_exchange(&different, &Xarc::null(), Ordering::AcqRel, Ordering::Acquire)
+///         .is_err());
+/// assert_eq!(*atomic.compare_exchange(&same, &Xarc::null(), Ordering::AcqRel, Ordering::Acquire)
+///             .unwrap().maybe_deref().unwrap(), 42);
+/// ```
 #[derive(Debug)]
-pub struct XarcAtomic<T: Send> {
+pub struct AtomicXarc<T: Send> {
     pub(crate) ptr: CachePadded<AtomicPtr<XarcData<T>>>,
 }
 
-impl<T: Send> XarcAtomic<T> {
+impl<T: Send> AtomicXarc<T> {
     /// Initialize the atomic smart pointer with `value`.
     #[must_use]
     pub fn new(value: T) -> Self {
-        XarcAtomic {
+        AtomicXarc {
             ptr: CachePadded::new(AtomicPtr::new(Box::into_raw(Box::new(XarcData::new(value))))),
         }
     }
@@ -22,19 +40,19 @@ impl<T: Send> XarcAtomic<T> {
     /// Initialize the atomic smart pointer with null.
     #[must_use]
     pub fn null() -> Self {
-        XarcAtomic {
+        AtomicXarc {
             ptr: CachePadded::new(AtomicPtr::new(ptr::null_mut())),
         }
     }
 
     #[must_use]
     pub(crate) fn init(ptr: *mut XarcData<T>) -> Self {
-        XarcAtomic {
+        AtomicXarc {
             ptr: CachePadded::new(AtomicPtr::new(ptr)),
         }
     }
 
-    /// As an atomic operation, if `self == current` swap the contents of `self` with `new`.
+    /// As an atomic operation, swap the contents of `self` with `new` if `self == current`.
     /// Returns the previous value of `self`.
     /// If the value does not equal `current` the operation failed.
     #[must_use]
@@ -51,7 +69,7 @@ impl<T: Send> XarcAtomic<T> {
         }
     }
 
-    /// As an atomic operation, if `self == current` swap the contents of `self` with `new`.
+    /// As an atomic operation, swap the contents of `self` with `new` if `self == current`.
     /// Returns the previous value of `self` in a Result indicating whether the operation succeeded or failed.
     pub fn compare_exchange(&self, current: &Xarc<T>, new: &Xarc<T>, success: Ordering, failure: Ordering) -> Result<Xarc<T>, Xarc<T>> {
         let guard = pin();
@@ -67,10 +85,9 @@ impl<T: Send> XarcAtomic<T> {
         }
     }
 
-    /// As an atomic operation, if `self == current` swap the contents of `self` with `new`.
+    /// As an atomic operation, swap the contents of `self` with `new` if `self == current` but with spurious failure of the comparison allowed.
     /// Returns the previous value of `self` in a Result indicating whether the operation succeeded or failed.
-    /// Failure does not necessarily imply that `self != current`.
-    /// This is typically called within a loop.
+    /// Allowing spurious failure is a performance optimization that is reasonable when no additional loops are required for correctness.
     pub fn compare_exchange_weak(&self, current: &Xarc<T>, new: &Xarc<T>, success: Ordering, failure: Ordering) -> Result<Xarc<T>, Xarc<T>> {
         let guard = pin();
         unguarded_increment(new.ptr);
@@ -85,19 +102,23 @@ impl<T: Send> XarcAtomic<T> {
         }
     }
 
-    /// Load the value into an `XarcLocal`.
+    /// Load the value into an `Xarc`.
     /// The internal atomic operation is repeated as needed until successful.
     #[must_use]
     pub fn load(&self, order: Ordering) -> Xarc<T> {
         let guard = pin();
+        let backoff = Backoff::new();
         loop {
             if let Ok(pointer) = Xarc::try_from(self.ptr.load(order), &guard) {
                 return pointer;
             }
+            else {
+                backoff.spin();
+            }
         }
     }
 
-    /// Attempt to load the value into an `XarcLocal`.
+    /// Attempt to load the value into an `Xarc`.
     /// It can fail if, after the pointer has been loaded but before it is used, it is swapped out in another thread and destroyed.
     pub fn try_load(&self, order: Ordering) -> Result<Xarc<T>, ()> {
         let guard = pin();
@@ -124,18 +145,18 @@ impl<T: Send> XarcAtomic<T> {
     }
 }
 
-impl<T: Send> Drop for XarcAtomic<T> {
+impl<T: Send> Drop for AtomicXarc<T> {
     fn drop(&mut self) {
         let ptr = self.ptr.load(Ordering::Relaxed);
         decrement(ptr, &pin());
     }
 }
 
-impl<T: Send> From<&Xarc<T>> for XarcAtomic<T> {
+impl<T: Send> From<&Xarc<T>> for AtomicXarc<T> {
     #[must_use]
     fn from(pointer: &Xarc<T>) -> Self {
         unguarded_increment(pointer.ptr);
-        XarcAtomic::init(pointer.ptr)
+        AtomicXarc::init(pointer.ptr)
     }
 }
 
@@ -145,7 +166,7 @@ mod tests {
 
     #[test]
     fn xarc_simple_st_test() {
-        let shared = XarcAtomic::new(42);
+        let shared = AtomicXarc::new(42);
         let local = shared.try_load(Ordering::Acquire).unwrap();
         drop(shared);
         assert_eq!(*local.maybe_deref().unwrap(), 42);

@@ -1,7 +1,7 @@
 use crossbeam_epoch::pin;
 use rayon::iter::*;
 use std::{sync::{Arc, atomic::Ordering}, time::SystemTime};
-use xarc::{XarcAtomic, Xarc};
+use xarc::{AtomicXarc, Xarc};
 
 fn main() {
     xarc_st_performance_test();
@@ -17,7 +17,7 @@ fn xarc_st_performance_test() {
     }
     let t1 = SystemTime::now();
     for _ in 1..500000 {
-        let _ = XarcAtomic::new(42);
+        let _ = AtomicXarc::new(42);
     }
     let t2 = SystemTime::now();
 
@@ -29,7 +29,7 @@ fn xarc_st_performance_test() {
 fn xarc_mt_performance_test() {
     println!("xarc_mt_performance_test:");
 
-    let shared = XarcAtomic::new(42);
+    let shared = AtomicXarc::new(42);
 
     let mut values: Vec<i64> = Vec::new();
     for i in 0..500000 {

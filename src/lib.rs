@@ -1,8 +1,12 @@
 //! # xarc
 //! 
-//! `xarc` implements `Xarc` and `XarcLocal` where
-//! `Xarc` is an atomic smart pointer and
-//! `XarcLocal` is the corresponding thread-local dereferenceable pointer.
+//! `xarc` provides atomically swappable atomically refcounted smart pointers
+//! as a safer building block for lockfree algorithms than raw atomic pointers.
+//! 
+//! `Xarc` is comparable to `Arc` but with the additional ability to atomically
+//! be swapped into and out of `AtomicXarc`.
+//! `Xarc` is dereferenceable but cannot have its contents atomically swapped.
+//! `AtomicXarc` can have its contents atomically swapped but is not dereferenceable.
 
 #![crate_name = "xarc"]
 
@@ -13,5 +17,5 @@ mod internal;
 mod atomic;
 mod pointer;
 
-pub use atomic::XarcAtomic;
+pub use atomic::AtomicXarc;
 pub use pointer::Xarc;

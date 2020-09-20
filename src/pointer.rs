@@ -3,7 +3,54 @@ use alloc::boxed::Box;
 use core::{hash::*, ptr};
 use crossbeam_epoch::{Guard, pin};
 
-/// `XarcLocal` is a thread-local smart pointer.
+/// `Xarc` is a derefenceable atomically refcounted smart pointer.
+/// `Xarc` is roughly equivalent to `Arc` but is compatible with `AtomicXarc`.
+/// 
+/// # Examples
+/// 
+/// Here is some typical usage of `Xarc`.
+/// ```
+/// use xarc::Xarc;
+/// 
+/// let xarc = Xarc::new(42);
+/// let same = xarc.clone();
+/// let different = Xarc::new(42);
+/// 
+/// // Null checks
+/// assert!(!xarc.is_null());
+/// assert_ne!(xarc, Xarc::null());
+/// 
+/// // Pointer comparisons
+/// assert_eq!(xarc, same);
+/// assert_ne!(xarc, different);
+/// 
+/// // Value comparisons
+/// assert_eq!(xarc.maybe_deref().unwrap(), different.maybe_deref().unwrap());
+/// assert_eq!(Xarc::<i64>::null().maybe_deref(), None);
+/// ```
+/// 
+/// When implementing a container you often need structures with an immutable part,
+/// such as a pointer to another part of the structure, and a separate value that
+/// you can `take` to return a value as you remove it. `UnsafeCell` comes to the rescue.
+/// ```
+/// use core::{cell::UnsafeCell, mem};
+/// use xarc::Xarc;
+/// 
+/// struct Example {
+///     immutable: i64,
+///     takeable: UnsafeCell<i64>,
+/// }
+/// 
+/// let mut xarc = Xarc::new(Example {immutable: 0, takeable: UnsafeCell::new(42)});
+/// 
+/// let value = unsafe {
+///     // You had better know what you're doing at this point. 🙂
+///     core::mem::take(&mut *xarc.maybe_deref().unwrap().takeable.get())
+/// };
+/// 
+/// assert_eq!(value, 42);
+/// ```
+
 #[derive(Debug, Eq)]
 pub struct Xarc<T: Send> {
     pub(crate) ptr: *mut XarcData<T>,
@@ -67,6 +114,7 @@ impl<T: Send> Xarc<T> {
 
     /// Dereference the pointer only if it is not null.
     /// None will be returned if it is null.
+    /// 
     /// # Safety
     /// - This should be called only if you're absolutely,
     /// 100% certain that nobody else could possibly have access to this data

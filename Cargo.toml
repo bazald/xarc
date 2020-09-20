@@ -1,8 +1,8 @@
 [package]
 name = "xarc"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Mitchell Keith Bloch <bazald@gmail.com>"]
-description = "Xarc and XarcLocal implement smart pointers that support atomic operations including compare_and_swap and compare_exchange."
+description = "`xarc` provides atomically swappable atomically refcounted smart pointers as a safer building block for lockfree algorithms than raw atomic pointers. `Xarc` is comparable to `Arc` but with the additional ability to atomically be swapped into and out of `AtomicXarc`. `Xarc` is dereferenceable but cannot have its contents atomically swapped. `AtomicXarc` can have its contents atomically swapped but is not dereferenceable."
 readme = "README.md"
 edition = "2018"
 repository = "https://github.com/bazald/xarc/"
@@ -10,11 +10,9 @@ license = "MPL-2.0"
 keywords = ["memory", "concurrency", "performance", "lock-free", "generic"]
 categories = ["concurrency", "memory-management"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 crossbeam-epoch = ">=0.6.0, <0.9.0"
-crossbeam-utils = ">=0.5.0, <0.8.0"
+crossbeam-utils = ">=0.7.0, <0.8.0"
 
 [dev-dependencies]
 crossbeam-queue = ">=0.1.0, <0.3.0"

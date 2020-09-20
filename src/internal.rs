@@ -1,26 +1,26 @@
 use alloc::boxed::Box;
-use core::sync::atomic::{AtomicI64, Ordering};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use crossbeam_epoch::Guard;
 use crossbeam_utils::CachePadded;
 
 pub(crate) struct XarcCount {
-    count: CachePadded<AtomicI64>,
+    count: CachePadded<AtomicUsize>,
 }
 
 impl XarcCount {
     #[must_use]
     fn new() -> XarcCount {
         XarcCount {
-            count: CachePadded::new(AtomicI64::new(1)),
+            count: CachePadded::new(AtomicUsize::new(1)),
         }
     }
 
     #[must_use]
-    pub(crate) fn decrement(&self) -> i64 {
+    pub(crate) fn decrement(&self) -> usize {
         self.count.fetch_sub(1, Ordering::Relaxed)
     }
 
-    pub(crate) fn try_increment(&self) -> Result<i64, i64> {
+    pub(crate) fn try_increment(&self) -> Result<usize, usize> {
         let mut count = self.count.load(Ordering::Relaxed);
         while count > 0 {
             match self.count.compare_exchange_weak(count, count + 1, Ordering::Relaxed, Ordering::Relaxed) {
@@ -32,7 +32,7 @@ impl XarcCount {
     }
 
     #[must_use]
-    fn unsafe_increment(&self) -> i64 {
+    fn unsafe_increment(&self) -> usize {
         self.count.fetch_add(1, Ordering::Relaxed)
     }
 }
