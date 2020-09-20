@@ -1,6 +1,7 @@
 use super::{internal::*};
+use alloc::boxed::Box;
+use core::{hash::*, ptr};
 use crossbeam_epoch::{Guard, pin};
-use std::{hash::*, ptr};
 
 /// `XarcLocal` is a thread-local smart pointer.
 #[derive(Debug, Eq)]

@@ -1,7 +1,8 @@
 use super::{internal::*, pointer::*};
+use alloc::boxed::Box;
+use core::{ptr, sync::atomic::{AtomicPtr, Ordering}};
 use crossbeam_epoch::pin;
 use crossbeam_utils::CachePadded;
-use std::{ptr, sync::atomic::{AtomicPtr, Ordering}};
 
 /// `Xarc` is an atomic smart pointer.
 #[derive(Debug)]

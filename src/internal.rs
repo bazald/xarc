@@ -1,6 +1,7 @@
+use alloc::boxed::Box;
+use core::sync::atomic::{AtomicI64, Ordering};
 use crossbeam_epoch::Guard;
 use crossbeam_utils::CachePadded;
-use std::sync::atomic::{AtomicI64, Ordering};
 
 pub(crate) struct XarcCount {
     count: CachePadded<AtomicI64>,
