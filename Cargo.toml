@@ -1,6 +1,6 @@
 [package]
 name = "xarc"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Mitchell Keith Bloch <bazald@gmail.com>"]
 description = "`xarc` provides atomically swappable atomically refcounted smart pointers as a safer building block for lockfree algorithms than raw atomic pointers. `Xarc` is comparable to `Arc` but with the additional ability to atomically be swapped into and out of `AtomicXarc`. `Xarc` is dereferenceable but cannot have its contents atomically swapped. `AtomicXarc` can have its contents atomically swapped but is not dereferenceable."
 readme = "README.md"
@@ -11,12 +11,12 @@ keywords = ["memory", "concurrency", "performance", "lock-free", "generic"]
 categories = ["concurrency", "memory-management"]
 
 [dependencies]
-crossbeam-epoch = ">=0.6.0, <0.9.0"
-crossbeam-utils = ">=0.7.0, <0.8.0"
+crossbeam-epoch = ">=0.6.0, <0.10.0"
+crossbeam-utils = ">=0.7.0, <0.9.0"
 
 [dev-dependencies]
-crossbeam-queue = ">=0.1.0, <0.3.0"
-rayon = ">=0.7.0, <1.5.0"
+crossbeam-queue = ">=0.1.0, <0.4.0"
+rayon = ">=0.7.0, <1.6.0"
 
-[target.'cfg(not(target_env = "msvc"))'.dev-dependencies]
+[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
 jemallocator = ">=0.1.8, <0.4.0"

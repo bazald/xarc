@@ -56,16 +56,10 @@ impl<T: Send> AtomicXarc<T> {
     /// Returns the previous value of `self`.
     /// If the value does not equal `current` the operation failed.
     #[must_use]
-    pub fn compare_and_swap(&self, current: &Xarc<T>, new: &Xarc<T>, order: Ordering) -> Xarc<T> {
-        let guard = pin();
-        unguarded_increment(new.ptr);
-        let ptr = self.ptr.compare_and_swap(current.ptr, new.ptr, order);
-        if ptr == current.ptr {
-            Xarc::init(ptr)
-        }
-        else {
-            decrement(new.ptr, &guard);
-            self.increment_or_reload(ptr, order)
+    pub fn compare_and_swap(&self, current: &Xarc<T>, new: &Xarc<T>, success: Ordering, failure: Ordering) -> Xarc<T> {
+        match self.compare_exchange(current, new, success, failure) {
+            Ok(ptr) => ptr,
+            Err(ptr) => ptr,
         }
     }
 
@@ -120,6 +114,7 @@ impl<T: Send> AtomicXarc<T> {
 
     /// Attempt to load the value into an `Xarc`.
     /// It can fail if, after the pointer has been loaded but before it is used, it is swapped out in another thread and destroyed.
+    #[allow(clippy::result_unit_err)]
     pub fn try_load(&self, order: Ordering) -> Result<Xarc<T>, ()> {
         let guard = pin();
         Xarc::try_from(self.ptr.load(order), &guard)

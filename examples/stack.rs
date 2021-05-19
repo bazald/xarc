@@ -4,7 +4,7 @@ use rayon::iter::*;
 use std::{cell::UnsafeCell, mem, sync::atomic::Ordering, time::SystemTime};
 use xarc::{AtomicXarc, Xarc};
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(not(target_os = "windows"))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 

@@ -5,7 +5,7 @@ use rayon::iter::*;
 use std::{cell::UnsafeCell, mem, sync::atomic::Ordering, time::SystemTime};
 use xarc::{AtomicXarc, Xarc};
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(not(target_os = "windows"))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
@@ -96,8 +96,8 @@ impl<T: Send> Queue<T> {
 
     fn try_update_tail(&self, current_tail: &Xarc<Node<T>>, new_tail: &Xarc<Node<T>>) -> Result<Xarc<Node<T>>, Xarc<Node<T>>> {
         current_tail.maybe_deref().unwrap().next.compare_exchange(&Xarc::null(), new_tail, Ordering::Relaxed, Ordering::Relaxed)
-            .map(|_| self.tail.compare_and_swap(current_tail, new_tail, Ordering::Relaxed))
-            .map_err(|current_tail_next| self.tail.compare_and_swap(current_tail, &current_tail_next, Ordering::Relaxed))
+            .map(|_| self.tail.compare_and_swap(current_tail, new_tail, Ordering::Relaxed, Ordering::Relaxed))
+            .map_err(|current_tail_next| self.tail.compare_and_swap(current_tail, &current_tail_next, Ordering::Relaxed, Ordering::Relaxed))
     }
 
     pub fn is_empty(&self) -> bool {
